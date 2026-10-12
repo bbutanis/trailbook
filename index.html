@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Trailbook</title>
+<meta name="theme-color" content="#1f3a3d">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Layout: full-bleed map, a single bottom sheet holding trip, stats, days and actions */
+:root {
+  --bg: #f3f5f4; --surface: #ffffff; --ink: #172426; --muted: #5d6f71;
+  --line: #d9e1e0; --accent: #1f6f6a; --accent-ink: #ffffff; --rec: #c8372d;
+  --shadow: 0 -6px 24px rgba(15, 35, 38, .14);
+  --font: "Roboto Flex", Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --num: ui-monospace, "Roboto Mono", "SF Mono", monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1717; --surface: #182222; --ink: #e4eeec; --muted: #94a8a6;
+    --line: #2a3a3a; --accent: #5cc2b8; --accent-ink: #0b1a19; --rec: #ff6b5e;
+    --shadow: 0 -6px 24px rgba(0, 0, 0, .5); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1717; --surface: #182222; --ink: #e4eeec; --muted: #94a8a6;
+  --line: #2a3a3a; --accent: #5cc2b8; --accent-ink: #0b1a19; --rec: #ff6b5e;
+  --shadow: 0 -6px 24px rgba(0, 0, 0, .5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.4 var(--font); display: flex; flex-direction: column; overflow: hidden; }
+#map { flex: 1; min-height: 0; background: var(--bg); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); } }
+:root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+
+.sheet { background: var(--surface); box-shadow: var(--shadow); border-radius: 18px 18px 0 0; margin-top: -18px; position: relative; z-index: 500;
+  padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 12px; max-height: 52vh; overflow-y: auto; }
+.grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto; }
+.head { display: flex; align-items: center; gap: 8px; }
+.trip-select { flex: 1; min-width: 0; font: 600 20px/1.2 var(--font); color: var(--ink); background: transparent; border: 0; padding: 4px 0; appearance: none; text-overflow: ellipsis; }
+.dates { color: var(--muted); font-size: 13px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stat { display: grid; gap: 2px; }
+.stat b { font: 600 22px/1 var(--num); font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.days { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.day { flex: none; display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  border-radius: 999px; padding: 6px 12px 6px 8px; font: 500 13px var(--font); cursor: pointer; }
+.day i { width: 14px; height: 14px; border-radius: 50%; background: var(--c); }
+.day small { color: var(--muted); font-family: var(--num); }
+.day.off { opacity: .45; }
+.day.off i { background: transparent; box-shadow: inset 0 0 0 2px var(--c); }
+.empty { color: var(--muted); font-size: 14px; }
+.actions { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; }
+button { font: 600 14px var(--font); border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); padding: 12px 10px; cursor: pointer; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.rec { background: var(--rec); border-color: var(--rec); color: #fff; }
+button.icon { padding: 8px 12px; border-radius: 10px; }
+.rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; }
+button.rec .rec-dot { animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { button.rec .rec-dot { animation: none; } }
+.status { font-size: 12px; color: var(--muted); font-family: var(--num); }
+
+dialog { border: 0; border-radius: 16px; background: var(--surface); color: var(--ink); width: min(420px, calc(100vw - 32px)); padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+dialog::backdrop { background: rgba(10, 20, 20, .45); }
+dialog h2 { margin: 0 0 14px; font-size: 18px; }
+dialog form { display: grid; gap: 12px; }
+label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+input { font: 16px var(--font); padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > * { flex: 1; }
+.danger { color: var(--rec); }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+.toast { position: fixed; left: 16px; right: 16px; top: calc(12px + env(safe-area-inset-top, 0px)); z-index: 1000; background: var(--ink); color: var(--bg);
+  padding: 12px 14px; border-radius: 12px; font-size: 14px; }
+.leaflet-container { font-family: var(--font); }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Trip map"></div>
+
+<section class="sheet" aria-label="Trip">
+  <div class="grab"></div>
+  <div class="head">
+    <select id="tripSelect" class="trip-select" aria-label="Choose trip"></select>
+    <button class="icon" id="editBtn" aria-label="Edit trip">Edit</button>
+    <button class="icon" id="newBtn" aria-label="New trip">New</button>
+  </div>
+  <div class="dates" id="dates"></div>
+  <div class="stats">
+    <div class="stat"><b id="sKm">0.0</b><span>km walked</span></div>
+    <div class="stat"><b id="sDays">0</b><span>days</span></div>
+    <div class="stat"><b id="sStops">0</b><span>stops</span></div>
+  </div>
+  <div class="days" id="days"></div>
+  <p class="empty" id="empty" hidden>No route yet. Tap <b>Import</b> to load your Google Maps Timeline export, or <b>Record</b> while you walk.</p>
+  <div class="actions">
+    <button id="recBtn" class="primary"><span class="rec-dot"></span>Record</button>
+    <button id="importBtn">Import</button>
+    <button id="exportBtn">Export</button>
+  </div>
+  <div class="status" id="status" hidden></div>
+  <input type="file" id="fileInput" accept=".json,.gpx,application/json,application/gpx+xml" hidden>
+</section>
+
+<dialog id="tripDialog">
+  <h2 id="tripDialogTitle">Trip</h2>
+  <form id="tripForm" method="dialog">
+    <label>Name <input id="fName" required maxlength="60"></label>
+    <div class="row">
+      <label>First day <input id="fStart" type="date" required></label>
+      <label>Last day <input id="fEnd" type="date" required></label>
+    </div>
+    <p class="hint">Imports keep only points between these dates.</p>
+    <div class="row">
+      <button type="button" id="deleteBtn" class="danger">Delete trip</button>
+      <button type="button" id="cancelBtn">Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="parse.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
